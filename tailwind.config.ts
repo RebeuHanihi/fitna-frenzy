@@ -52,6 +52,13 @@ export default {
 					DEFAULT: 'hsl(var(--card))',
 					foreground: 'hsl(var(--card-foreground))'
 				},
+				// Game-specific colors for Fitna
+				'game-purple': 'hsl(var(--game-purple))',
+				'game-purple-dark': 'hsl(var(--game-purple-dark))',
+				'game-yellow': 'hsl(var(--game-yellow))',
+				'game-yellow-dark': 'hsl(var(--game-yellow-dark))',
+				'game-beige': 'hsl(var(--game-beige))',
+				'game-beige-light': 'hsl(var(--game-beige-light))',
 				sidebar: {
 					DEFAULT: 'hsl(var(--sidebar-background))',
 					foreground: 'hsl(var(--sidebar-foreground))',
