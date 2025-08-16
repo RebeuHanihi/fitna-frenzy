@@ -14,7 +14,131 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      game_rooms: {
+        Row: {
+          available_names: string[]
+          code: string
+          created_at: string
+          current_question_index: number
+          game_phase: string
+          id: string
+          owner_id: string
+          owner_name: string
+          owner_pseudo: string
+          timer: number
+          updated_at: string
+        }
+        Insert: {
+          available_names: string[]
+          code: string
+          created_at?: string
+          current_question_index?: number
+          game_phase?: string
+          id?: string
+          owner_id: string
+          owner_name: string
+          owner_pseudo: string
+          timer?: number
+          updated_at?: string
+        }
+        Update: {
+          available_names?: string[]
+          code?: string
+          created_at?: string
+          current_question_index?: number
+          game_phase?: string
+          id?: string
+          owner_id?: string
+          owner_name?: string
+          owner_pseudo?: string
+          timer?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      players: {
+        Row: {
+          created_at: string
+          has_submitted_questions: boolean
+          id: string
+          points: number
+          pseudo: string
+          real_name: string
+          room_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          has_submitted_questions?: boolean
+          id?: string
+          points?: number
+          pseudo: string
+          real_name: string
+          room_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          has_submitted_questions?: boolean
+          id?: string
+          points?: number
+          pseudo?: string
+          real_name?: string
+          room_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "players_room_id_fkey"
+            columns: ["room_id"]
+            isOneToOne: false
+            referencedRelation: "game_rooms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      questions: {
+        Row: {
+          author_id: string
+          created_at: string
+          id: string
+          room_id: string
+          target_player_name: string
+          text: string
+        }
+        Insert: {
+          author_id: string
+          created_at?: string
+          id?: string
+          room_id: string
+          target_player_name: string
+          text: string
+        }
+        Update: {
+          author_id?: string
+          created_at?: string
+          id?: string
+          room_id?: string
+          target_player_name?: string
+          text?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "questions_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "questions_room_id_fkey"
+            columns: ["room_id"]
+            isOneToOne: false
+            referencedRelation: "game_rooms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

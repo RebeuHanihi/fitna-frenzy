@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { supabase } from '@/integrations/supabase/client'
 
 export interface Player {
   id: string
@@ -16,8 +17,11 @@ export interface Question {
 }
 
 export interface GameRoom {
+  id: string
   code: string
   ownerId: string
+  ownerName: string
+  ownerPseudo: string
   players: Player[]
   availableNames: string[]
   questions: Question[]
@@ -31,28 +35,62 @@ interface GameState {
   currentPlayer: Player | null
   
   // Actions
-  createRoom: (ownerName: string, ownerPseudo: string, availableNames: string[]) => string
-  joinRoom: (code: string, realName: string, pseudo: string) => boolean
-  submitQuestions: (questions: string[]) => void
-  startGame: () => void
+  createRoom: (ownerName: string, ownerPseudo: string, availableNames: string[]) => Promise<string>
+  joinRoom: (code: string, realName: string, pseudo: string) => Promise<boolean>
+  submitQuestions: (questions: string[]) => Promise<void>
+  startGame: () => Promise<void>
   drawCard: () => Question | null
   denounce: () => void
-  addPoints: (playerId: string, points: number) => void
-  nextTurn: () => void
-  endGame: () => void
+  addPoints: (playerId: string, points: number) => Promise<void>
+  nextTurn: () => Promise<void>
+  endGame: () => Promise<void>
   leaveRoom: () => void
+  loadRoomData: (roomId: string) => Promise<void>
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
   currentRoom: null,
   currentPlayer: null,
 
-  createRoom: (ownerName: string, ownerPseudo: string, availableNames: string[]) => {
+  createRoom: async (ownerName: string, ownerPseudo: string, availableNames: string[]) => {
     const code = Math.random().toString(36).substring(2, 8).toUpperCase()
-    const ownerId = Math.random().toString(36).substring(2, 15)
     
+    // Create room in database
+    const { data: roomData, error: roomError } = await supabase
+      .from('game_rooms')
+      .insert({
+        code,
+        owner_id: 'temp-owner-id',
+        owner_name: ownerName,
+        owner_pseudo: ownerPseudo,
+        available_names: availableNames,
+      })
+      .select()
+      .single()
+
+    if (roomError) throw roomError
+
+    // Create owner player
+    const { data: playerData, error: playerError } = await supabase
+      .from('players')
+      .insert({
+        room_id: roomData.id,
+        real_name: ownerName,
+        pseudo: ownerPseudo,
+      })
+      .select()
+      .single()
+
+    if (playerError) throw playerError
+
+    // Update room with actual owner ID
+    await supabase
+      .from('game_rooms')
+      .update({ owner_id: playerData.id })
+      .eq('id', roomData.id)
+
     const owner: Player = {
-      id: ownerId,
+      id: playerData.id,
       realName: ownerName,
       pseudo: ownerPseudo,
       points: 0,
@@ -60,8 +98,11 @@ export const useGameStore = create<GameState>((set, get) => ({
     }
 
     const room: GameRoom = {
-      code,
-      ownerId,
+      id: roomData.id,
+      code: roomData.code,
+      ownerId: playerData.id,
+      ownerName: ownerName,
+      ownerPseudo: ownerPseudo,
       players: [owner],
       availableNames,
       questions: [],
@@ -74,67 +115,175 @@ export const useGameStore = create<GameState>((set, get) => ({
     return code
   },
 
-  joinRoom: (code: string, realName: string, pseudo: string) => {
-    const { currentRoom } = get()
-    // Simulation - in real app this would check if room exists
-    if (!currentRoom || currentRoom.code !== code) {
+  joinRoom: async (code: string, realName: string, pseudo: string) => {
+    try {
+      // Find room by code
+      const { data: roomData, error: roomError } = await supabase
+        .from('game_rooms')
+        .select('*')
+        .eq('code', code.toUpperCase())
+        .single()
+
+      if (roomError || !roomData) {
+        return false
+      }
+
+      // Check if name is available
+      if (!roomData.available_names.includes(realName)) {
+        return false
+      }
+
+      // Create new player
+      const { data: playerData, error: playerError } = await supabase
+        .from('players')
+        .insert({
+          room_id: roomData.id,
+          real_name: realName,
+          pseudo: pseudo,
+        })
+        .select()
+        .single()
+
+      if (playerError) throw playerError
+
+      // Load complete room data
+      await get().loadRoomData(roomData.id)
+
+      const newPlayer: Player = {
+        id: playerData.id,
+        realName: realName,
+        pseudo: pseudo,
+        points: 0,
+        hasSubmittedQuestions: false
+      }
+
+      set({ currentPlayer: newPlayer })
+      return true
+    } catch (error) {
+      console.error('Error joining room:', error)
       return false
     }
-
-    const playerId = Math.random().toString(36).substring(2, 15)
-    const newPlayer: Player = {
-      id: playerId,
-      realName,
-      pseudo,
-      points: 0,
-      hasSubmittedQuestions: false
-    }
-
-    const updatedRoom = {
-      ...currentRoom,
-      players: [...currentRoom.players, newPlayer]
-    }
-
-    set({ currentRoom: updatedRoom, currentPlayer: newPlayer })
-    return true
   },
 
-  submitQuestions: (questionTexts: string[]) => {
+  loadRoomData: async (roomId: string) => {
+    try {
+      // Load room data
+      const { data: roomData, error: roomError } = await supabase
+        .from('game_rooms')
+        .select('*')
+        .eq('id', roomId)
+        .single()
+
+      if (roomError) throw roomError
+
+      // Load players
+      const { data: playersData, error: playersError } = await supabase
+        .from('players')
+        .select('*')
+        .eq('room_id', roomId)
+        .order('created_at', { ascending: true })
+
+      if (playersError) throw playersError
+
+      // Load questions
+      const { data: questionsData, error: questionsError } = await supabase
+        .from('questions')
+        .select('*')
+        .eq('room_id', roomId)
+
+      if (questionsError) throw questionsError
+
+      const players: Player[] = playersData.map(p => ({
+        id: p.id,
+        realName: p.real_name,
+        pseudo: p.pseudo,
+        points: p.points,
+        hasSubmittedQuestions: p.has_submitted_questions
+      }))
+
+      const questions: Question[] = questionsData.map(q => ({
+        id: q.id,
+        text: q.text,
+        targetPlayerName: q.target_player_name,
+        authorId: q.author_id
+      }))
+
+      const room: GameRoom = {
+        id: roomData.id,
+        code: roomData.code,
+        ownerId: roomData.owner_id,
+        ownerName: roomData.owner_name,
+        ownerPseudo: roomData.owner_pseudo,
+        players,
+        availableNames: roomData.available_names,
+        questions,
+        currentQuestionIndex: roomData.current_question_index,
+        gamePhase: roomData.game_phase as GameRoom['gamePhase'],
+        timer: roomData.timer
+      }
+
+      set({ currentRoom: room })
+    } catch (error) {
+      console.error('Error loading room data:', error)
+    }
+  },
+
+  submitQuestions: async (questionTexts: string[]) => {
     const { currentRoom, currentPlayer } = get()
     if (!currentRoom || !currentPlayer) return
 
-    const otherPlayers = currentRoom.players.filter(p => p.id !== currentPlayer.id)
-    const newQuestions: Question[] = questionTexts.map((text, index) => ({
-      id: Math.random().toString(36).substring(2, 15),
-      text,
-      targetPlayerName: otherPlayers[index]?.realName || '',
-      authorId: currentPlayer.id
-    }))
+    try {
+      const otherPlayers = currentRoom.players.filter(p => p.id !== currentPlayer.id)
+      const questions = questionTexts.map((text, index) => ({
+        room_id: currentRoom.id,
+        author_id: currentPlayer.id,
+        text,
+        target_player_name: otherPlayers[index]?.realName || '',
+      }))
 
-    const updatedPlayer = { ...currentPlayer, hasSubmittedQuestions: true }
-    const updatedPlayers = currentRoom.players.map(p => 
-      p.id === currentPlayer.id ? updatedPlayer : p
-    )
+      // Insert questions
+      const { error: questionsError } = await supabase
+        .from('questions')
+        .insert(questions)
 
-    const updatedRoom = {
-      ...currentRoom,
-      players: updatedPlayers,
-      questions: [...currentRoom.questions, ...newQuestions]
+      if (questionsError) throw questionsError
+
+      // Update player status
+      const { error: playerError } = await supabase
+        .from('players')
+        .update({ has_submitted_questions: true })
+        .eq('id', currentPlayer.id)
+
+      if (playerError) throw playerError
+
+      // Reload room data
+      await get().loadRoomData(currentRoom.id)
+    } catch (error) {
+      console.error('Error submitting questions:', error)
     }
-
-    set({ currentRoom: updatedRoom, currentPlayer: updatedPlayer })
   },
 
-  startGame: () => {
+  startGame: async () => {
     const { currentRoom } = get()
     if (!currentRoom) return
 
-    set({
-      currentRoom: {
-        ...currentRoom,
-        gamePhase: 'playing'
-      }
-    })
+    try {
+      const { error } = await supabase
+        .from('game_rooms')
+        .update({ game_phase: 'playing' })
+        .eq('id', currentRoom.id)
+
+      if (error) throw error
+
+      set({
+        currentRoom: {
+          ...currentRoom,
+          gamePhase: 'playing'
+        }
+      })
+    } catch (error) {
+      console.error('Error starting game:', error)
+    }
   },
 
   drawCard: () => {
@@ -167,44 +316,88 @@ export const useGameStore = create<GameState>((set, get) => ({
     get().addPoints(currentPlayer.id, 10)
   },
 
-  addPoints: (playerId: string, points: number) => {
+  addPoints: async (playerId: string, points: number) => {
     const { currentRoom } = get()
     if (!currentRoom) return
 
-    const updatedPlayers = currentRoom.players.map(p =>
-      p.id === playerId ? { ...p, points: p.points + points } : p
-    )
+    try {
+      // Get current player points first
+      const { data: playerData, error: getError } = await supabase
+        .from('players')
+        .select('points')
+        .eq('id', playerId)
+        .single()
 
-    set({
-      currentRoom: {
-        ...currentRoom,
-        players: updatedPlayers
-      }
-    })
+      if (getError) throw getError
+
+      // Update points in database
+      const { error } = await supabase
+        .from('players')
+        .update({ points: (playerData?.points || 0) + points })
+        .eq('id', playerId)
+
+      if (error) throw error
+
+      // Update local state
+      const updatedPlayers = currentRoom.players.map(p =>
+        p.id === playerId ? { ...p, points: p.points + points } : p
+      )
+
+      set({
+        currentRoom: {
+          ...currentRoom,
+          players: updatedPlayers
+        }
+      })
+    } catch (error) {
+      console.error('Error adding points:', error)
+    }
   },
 
-  nextTurn: () => {
+  nextTurn: async () => {
     const { currentRoom } = get()
     if (!currentRoom) return
 
-    set({
-      currentRoom: {
-        ...currentRoom,
-        timer: 60
-      }
-    })
+    try {
+      const { error } = await supabase
+        .from('game_rooms')
+        .update({ timer: 60 })
+        .eq('id', currentRoom.id)
+
+      if (error) throw error
+
+      set({
+        currentRoom: {
+          ...currentRoom,
+          timer: 60
+        }
+      })
+    } catch (error) {
+      console.error('Error updating timer:', error)
+    }
   },
 
-  endGame: () => {
+  endGame: async () => {
     const { currentRoom } = get()
     if (!currentRoom) return
 
-    set({
-      currentRoom: {
-        ...currentRoom,
-        gamePhase: 'finished'
-      }
-    })
+    try {
+      const { error } = await supabase
+        .from('game_rooms')
+        .update({ game_phase: 'finished' })
+        .eq('id', currentRoom.id)
+
+      if (error) throw error
+
+      set({
+        currentRoom: {
+          ...currentRoom,
+          gamePhase: 'finished'
+        }
+      })
+    } catch (error) {
+      console.error('Error ending game:', error)
+    }
   },
 
   leaveRoom: () => {

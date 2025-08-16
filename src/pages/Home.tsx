@@ -12,14 +12,39 @@ const Home = () => {
   const [showCreateForm, setShowCreateForm] = useState(false)
   const [ownerName, setOwnerName] = useState('')
   const [ownerPseudo, setOwnerPseudo] = useState('')
+  const [availableNames, setAvailableNames] = useState([''])
+  const [error, setError] = useState('')
 
-  const handleCreateRoom = () => {
+  const handleCreateRoom = async () => {
     if (!ownerName.trim() || !ownerPseudo.trim()) return
+    
+    const namesList = availableNames.filter(name => name.trim() !== '')
+    if (namesList.length < 2) {
+      setError('Ajoutez au moins 2 prénoms pour vos amis')
+      return
+    }
 
-    // Default available names for demo
-    const availableNames = ['Sophie', 'Hasan', 'Aminata', 'Julien', 'Emma', 'Karim', 'Léa', 'Omar']
-    const code = createRoom(ownerName, ownerPseudo, availableNames)
-    navigate('/lobby')
+    try {
+      const code = await createRoom(ownerName, ownerPseudo, namesList)
+      navigate('/lobby')
+    } catch (err) {
+      setError('Erreur lors de la création de la room')
+    }
+  }
+
+  const addNameField = () => {
+    setAvailableNames([...availableNames, ''])
+  }
+
+  const updateName = (index: number, value: string) => {
+    const updated = availableNames.map((name, i) => i === index ? value : name)
+    setAvailableNames(updated)
+  }
+
+  const removeName = (index: number) => {
+    if (availableNames.length > 1) {
+      setAvailableNames(availableNames.filter((_, i) => i !== index))
+    }
   }
 
   const handleJoinRoom = () => {
@@ -101,6 +126,12 @@ const Home = () => {
                 </GameCardTitle>
               </GameCardHeader>
               <GameCardContent className="space-y-4">
+                {error && (
+                  <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3">
+                    <p className="text-destructive text-sm text-center">{error}</p>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-sm font-medium mb-2">Votre prénom</label>
                   <Input
@@ -119,11 +150,53 @@ const Home = () => {
                   />
                 </div>
 
+                <div>
+                  <label className="block text-sm font-medium mb-2">
+                    Prénoms de vos amis (liste pour le jeu)
+                  </label>
+                  <div className="space-y-2">
+                    {availableNames.map((name, index) => (
+                      <div key={index} className="flex gap-2">
+                        <Input
+                          placeholder={`Prénom ${index + 1}`}
+                          value={name}
+                          onChange={(e) => updateName(index, e.target.value)}
+                          className="flex-1"
+                        />
+                        {availableNames.length > 1 && (
+                          <GameButton
+                            variant="outline"
+                            size="default"
+                            onClick={() => removeName(index)}
+                            className="px-3"
+                          >
+                            ✕
+                          </GameButton>
+                        )}
+                      </div>
+                    ))}
+                    <GameButton
+                      variant="outline"
+                      size="default"
+                      onClick={addNameField}
+                      className="w-full"
+                    >
+                      + Ajouter un prénom
+                    </GameButton>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Les joueurs choisiront parmi ces prénoms en rejoignant
+                  </p>
+                </div>
+
                 <div className="flex gap-3 pt-2">
                   <GameButton 
                     variant="outline" 
                     size="default"
-                    onClick={() => setShowCreateForm(false)}
+                    onClick={() => {
+                      setShowCreateForm(false)
+                      setError('')
+                    }}
                     className="flex-1"
                   >
                     Retour
@@ -132,7 +205,7 @@ const Home = () => {
                     variant="purple" 
                     size="default"
                     onClick={handleCreateRoom}
-                    disabled={!ownerName.trim() || !ownerPseudo.trim()}
+                    disabled={!ownerName.trim() || !ownerPseudo.trim() || availableNames.filter(n => n.trim()).length < 2}
                     className="flex-1"
                   >
                     Créer
