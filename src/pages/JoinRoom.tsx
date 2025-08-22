@@ -18,13 +18,16 @@ const JoinRoom = () => {
   // Demo available names
   const availableNames = ['Sophie', 'Hasan', 'Aminata', 'Julien', 'Emma', 'Karim', 'Léa', 'Omar']
 
-  const handleJoin = () => {
+  const handleJoin = async () => {
     if (!realName || !pseudo.trim()) {
       setError('Veuillez remplir tous les champs')
       return
     }
 
-    const success = joinRoom(code || '', realName, pseudo)
+    console.log('Attempting to join room:', code, 'with name:', realName, 'pseudo:', pseudo)
+    const success = await joinRoom(code || '', realName, pseudo)
+    console.log('Join room result:', success)
+    
     if (success) {
       navigate('/lobby')
     } else {
