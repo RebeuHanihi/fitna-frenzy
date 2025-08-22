@@ -55,68 +55,93 @@ export const useGameStore = create<GameState>((set, get) => ({
   createRoom: async (ownerName: string, ownerPseudo: string, availableNames: string[]) => {
     const code = Math.random().toString(36).substring(2, 8).toUpperCase()
     
-    // Create room in database
-    const { data: roomData, error: roomError } = await supabase
-      .from('game_rooms')
-      .insert({
-        code,
-        owner_id: 'temp-owner-id',
-        owner_name: ownerName,
-        owner_pseudo: ownerPseudo,
-        available_names: availableNames,
-      })
-      .select()
-      .single()
+    try {
+      console.log('Creating room with code:', code)
+      
+      // Create room in database with null owner_id initially
+      const { data: roomData, error: roomError } = await supabase
+        .from('game_rooms')
+        .insert({
+          code,
+          owner_id: '00000000-0000-0000-0000-000000000000', // Temporary UUID
+          owner_name: ownerName,
+          owner_pseudo: ownerPseudo,
+          available_names: availableNames,
+        })
+        .select()
+        .single()
 
-    if (roomError) throw roomError
+      if (roomError) {
+        console.error('Room creation error:', roomError)
+        throw roomError
+      }
 
-    // Create owner player
-    const { data: playerData, error: playerError } = await supabase
-      .from('players')
-      .insert({
-        room_id: roomData.id,
-        real_name: ownerName,
+      console.log('Room created:', roomData)
+
+      // Create owner player
+      const { data: playerData, error: playerError } = await supabase
+        .from('players')
+        .insert({
+          room_id: roomData.id,
+          real_name: ownerName,
+          pseudo: ownerPseudo,
+        })
+        .select()
+        .single()
+
+      if (playerError) {
+        console.error('Player creation error:', playerError)
+        throw playerError
+      }
+
+      console.log('Player created:', playerData)
+
+      // Update room with actual owner ID
+      const { error: updateError } = await supabase
+        .from('game_rooms')
+        .update({ owner_id: playerData.id })
+        .eq('id', roomData.id)
+
+      if (updateError) {
+        console.error('Room update error:', updateError)
+        throw updateError
+      }
+
+      const owner: Player = {
+        id: playerData.id,
+        realName: ownerName,
         pseudo: ownerPseudo,
-      })
-      .select()
-      .single()
+        points: 0,
+        hasSubmittedQuestions: false
+      }
 
-    if (playerError) throw playerError
+      const room: GameRoom = {
+        id: roomData.id,
+        code: roomData.code,
+        ownerId: playerData.id,
+        ownerName: ownerName,
+        ownerPseudo: ownerPseudo,
+        players: [owner],
+        availableNames,
+        questions: [],
+        currentQuestionIndex: 0,
+        gamePhase: 'waiting',
+        timer: 60
+      }
 
-    // Update room with actual owner ID
-    await supabase
-      .from('game_rooms')
-      .update({ owner_id: playerData.id })
-      .eq('id', roomData.id)
-
-    const owner: Player = {
-      id: playerData.id,
-      realName: ownerName,
-      pseudo: ownerPseudo,
-      points: 0,
-      hasSubmittedQuestions: false
+      set({ currentRoom: room, currentPlayer: owner })
+      console.log('Room creation successful, code:', code)
+      return code
+    } catch (error) {
+      console.error('Error in createRoom:', error)
+      throw error
     }
-
-    const room: GameRoom = {
-      id: roomData.id,
-      code: roomData.code,
-      ownerId: playerData.id,
-      ownerName: ownerName,
-      ownerPseudo: ownerPseudo,
-      players: [owner],
-      availableNames,
-      questions: [],
-      currentQuestionIndex: 0,
-      gamePhase: 'waiting',
-      timer: 60
-    }
-
-    set({ currentRoom: room, currentPlayer: owner })
-    return code
   },
 
   joinRoom: async (code: string, realName: string, pseudo: string) => {
     try {
+      console.log('Attempting to join room with code:', code, 'name:', realName, 'pseudo:', pseudo)
+      
       // Find room by code
       const { data: roomData, error: roomError } = await supabase
         .from('game_rooms')
@@ -124,12 +149,17 @@ export const useGameStore = create<GameState>((set, get) => ({
         .eq('code', code.toUpperCase())
         .single()
 
+      console.log('Room query result:', { roomData, roomError })
+
       if (roomError || !roomData) {
+        console.log('Room not found or error occurred')
         return false
       }
 
       // Check if name is available
+      console.log('Available names in room:', roomData.available_names)
       if (!roomData.available_names.includes(realName)) {
+        console.log('Name not available:', realName)
         return false
       }
 
@@ -143,6 +173,8 @@ export const useGameStore = create<GameState>((set, get) => ({
         })
         .select()
         .single()
+
+      console.log('Player creation result:', { playerData, playerError })
 
       if (playerError) throw playerError
 
@@ -158,6 +190,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       }
 
       set({ currentPlayer: newPlayer })
+      console.log('Successfully joined room')
       return true
     } catch (error) {
       console.error('Error joining room:', error)
